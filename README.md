@@ -37,6 +37,10 @@ You can also modify gravity, radius and more using your keyboard.
 - **J** : Decrease gravity
 - **I** : Increase ball radius
 - **K** : Decrease ball radius
+- **O** : Increase friction
+- **L** : Decrease friction
+
+You can also click on the screen to drag particles.
 
 ## Why ?
 
