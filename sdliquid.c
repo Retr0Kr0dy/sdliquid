@@ -9,6 +9,13 @@ int CHAR_SIZE = 32;
 
 float GRAVITY = 0.9f;
 int RADIUS = 15;
+float FRICTION = 0.9f;
+
+int mouseX = 0;
+int mouseY = 0;
+int MOUSE_CLICKED = 1;
+
+float averageSpeed = 1;
 
 int entity_count = 0;
 
@@ -23,11 +30,10 @@ struct entity {
 	float velY;
 	int radius;
 	float gravity;
+    float friction;
 };
 
 struct entity entity_list[16536];
-
-//const float FRICTION = 0.9f;
 
 void addBall() {
 	struct entity ett;
@@ -37,6 +43,7 @@ void addBall() {
 	ett.velY = 0.0f;
 	ett.radius = RADIUS;
 	ett.gravity = GRAVITY;
+    ett.friction = FRICTION;
 	entity_list[entity_count] = ett;
 	entity_count++;
 }
@@ -59,7 +66,7 @@ float calculateSpeed(struct entity* ett) {
 }
 
 void speedToColor(float speed, Uint8* r, Uint8* g, Uint8* b) {
-    float normalizedSpeed = fmin(speed / 10.0, 1.0);
+    float normalizedSpeed = fmin(speed / averageSpeed, 1.0);
 
     *r = (Uint8)(normalizedSpeed * 255);
     *g = 0;
@@ -103,12 +110,38 @@ int checkParticleDistance(struct entity ett1, struct entity ett2) {
 }
 
 
+// Function to check and handle collision with screen boundaries
+void checkCollisionWithScreenBoundaries(struct entity* ett) {
+    float* positions[2] = { &ett->posX, &ett->posY };
+    float* velocities[2] = { &ett->velX, &ett->velY };
+    float bounds[2] = { SCREEN_WIDTH, SCREEN_HEIGHT };
+
+    for (int i = 0; i < 2; i++) {
+        if (*positions[i] - ett->radius < 0) {
+            *positions[i] = ett->radius;
+            *velocities[i] *= -1 * FRICTION;
+        }
+        if (*positions[i] + ett->radius > bounds[i]) {
+            *positions[i] = bounds[i] - ett->radius;
+            *velocities[i] *= -1 * FRICTION;
+        }
+    }
+}
+
 void handleCollision(struct entity* ett1, struct entity* ett2) {
     float dx = ett1->posX - ett2->posX;
     float dy = ett1->posY - ett2->posY;
     float distance = sqrt(dx * dx + dy * dy);
 
-    if (distance == 0) distance = 0.1;
+    if (distance == 0) {
+        distance = ett1->radius + 0.5;
+
+        ett1->posX += 10;
+        ett1->posY += 10;
+
+        ett2->posX -= 10;
+        ett2->posY -= 10;
+    }
 
     float nx = dx / distance;
     float ny = dy / distance;
@@ -120,7 +153,7 @@ void handleCollision(struct entity* ett1, struct entity* ett2) {
 
     if (dotProductResult > 0) return;
 
-    float restitution = 1.0;
+    float restitution = FRICTION;
 
     float impulse = (2.0 * dotProductResult) / (1.0 + 1.0) * restitution;
 
@@ -143,13 +176,17 @@ void handleCollision(struct entity* ett1, struct entity* ett2) {
 }
 
 void drawBall(SDL_Renderer* renderer, int centerX, int centerY, int radius, Uint8 r, Uint8 g, Uint8 b) {
-    SDL_SetRenderDrawColor(renderer, r, g, b, 255);
-
     for (int w = 0; w < radius * 2; w++) {
         for (int h = 0; h < radius * 2; h++) {
             int dx = radius - w;
             int dy = radius - h;
-            if ((dx * dx + dy * dy) <= (radius * radius)) {
+            float distance = sqrt(dx * dx + dy * dy);
+
+            if (distance <= radius) {
+                // Exponential fade, the farther from the center, the more transparent
+                float alpha = 255 * exp(-2 * (distance / radius));
+
+                SDL_SetRenderDrawColor(renderer, r, g, b, (Uint8)alpha);
                 SDL_RenderDrawPoint(renderer, centerX + dx, centerY + dy);
             }
         }
@@ -170,6 +207,8 @@ int main(int argc, char* args[]) {
     SDL_Window* window = NULL;
     SDL_Renderer* renderer = NULL;
 
+    SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_BLEND);
+
 	TTF_Init();
 
 	TTF_Font* font = TTF_OpenFont("font.ttf", CHAR_SIZE);
@@ -180,115 +219,129 @@ int main(int argc, char* args[]) {
 
     if (SDL_Init(SDL_INIT_VIDEO) < 0) {
         printf("SDL could not initialize! SDL_Error: %s\n", SDL_GetError());
-    } else {
-        window = SDL_CreateWindow("SDLIQUID", SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED, SCREEN_WIDTH, SCREEN_HEIGHT, SDL_WINDOW_SHOWN);
-        if (window == NULL) {
-            printf("Window could not be created! SDL_Error: %s\n", SDL_GetError());
-        } else {
-            renderer = SDL_CreateRenderer(window, -1, SDL_RENDERER_ACCELERATED);
-            if (renderer == NULL) {
-                printf("Renderer could not be created! SDL_Error: %s\n", SDL_GetError());
-            } else {
-                int quit = 0;
+        return 1;
+    }
 
-                SDL_Event e;
+    window = SDL_CreateWindow("SDLIQUID", SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED, SCREEN_WIDTH, SCREEN_HEIGHT, SDL_WINDOW_SHOWN);
+    if (window == NULL) {
+        printf("Window could not be created! SDL_Error: %s\n", SDL_GetError());
+        return 1;
+    }
+    renderer = SDL_CreateRenderer(window, -1, SDL_RENDERER_ACCELERATED);
+    if (renderer == NULL) {
+        printf("Renderer could not be created! SDL_Error: %s\n", SDL_GetError());
+        return 1;
+    }
+    int quit = 0;
 
-                while (!quit) {
-                    while (SDL_PollEvent(&e) != 0) {
-                        if (e.type == SDL_QUIT) {
-                            quit = 1;
-                        }
-                        else if (e.type == SDL_KEYDOWN) {
-                            switch (e.key.keysym.sym) {
-                                case SDLK_q:
-                                    quit = 1;
-                                    break;
-                                case SDLK_a:
-                                    addBall();
-                                    break;
-                                case SDLK_u:
-                                    GRAVITY += 0.1f;
-                                    break;
-                                case SDLK_j:
-									GRAVITY -= 0.1f;
-                                    break;
-                                case SDLK_i:
-                                    RADIUS += 1;
-                                    break;
-                                case SDLK_k:
-                                    RADIUS -= 1;
-                                    break;
-                            }
-                        }
-                    }
+    SDL_Event e;
 
-                    SDL_SetRenderDrawColor(renderer, 44, 62, 80, 255);
-                    SDL_RenderClear(renderer);
+    SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_BLEND);
 
-					for (int i = 0; i < entity_count; i++) {
-						struct entity ett = entity_list[i];
-
-						ett.gravity = GRAVITY;
-						ett.radius = RADIUS;
-
-						ett.velY += ett.gravity;
-
-						ett.posX += ett.velX;
-						ett.posY += ett.velY;
-
-				        // Check for collision with screen boundaries
-				        if (ett.posX - ett.radius < 0) {
-							ett.posX = 0 + ett.radius;
-                            ett.velX *= -1;
-						}
-						if (ett.posX + ett.radius > SCREEN_WIDTH) {
-							ett.posX = SCREEN_WIDTH - ett.radius;
-				            ett.velX *= -1;
-				        }
-				        if (ett.posY - ett.radius < 0) {
-							ett.posY = 0 + ett.radius;
-                            ett.velY *= -1;
-						}
-						if (ett.posY + ett.radius > SCREEN_HEIGHT) {
-                            ett.posY = SCREEN_HEIGHT - ett.radius;
-				            ett.velY *= -1;
-				        }
-
-				        // Check for collision with other entities
-				        for (int y = 0; y < entity_count; y++) {
-				            if (i != y) { // Skip self-collision check
-				                struct entity ett2 = entity_list[y];
-								if (checkParticleDistance(ett, ett2)) {
-					                if (checkCollision(ett, ett2)) {
-					                    handleCollision(&ett, &ett2);
-					                }
-								}
-				            }
-				        }
-
-						entity_list[i] = ett;
-
-						float speed = calculateSpeed(&ett);
-				        Uint8 r, g, b;
-				        speedToColor(speed, &r, &g, &b);
-
-				        drawBall(renderer, (int)ett.posX, (int)ett.posY, ett.radius, r, g, b);
-					}
-
-					updateFPS();
-				    float averageSpeed = calculateAverageSpeed();
-				    char debugText[128];
-				    sprintf(debugText, "FPS: %.2f   ENTITIES: %d   AVERAGE SPEED: %.2f", fps, entity_count, averageSpeed);
-				    renderText(renderer, font, debugText, 10, 10);
-
-                    sprintf(debugText, "GRAVITY:%.1f   RADIUS:%d", GRAVITY, RADIUS);
-                    renderText(renderer, font, debugText, 10, CHAR_SIZE + 10);
-                    SDL_RenderPresent(renderer);
-
-                    SDL_Delay(16);
+    while (!quit) {
+        while (SDL_PollEvent(&e) != 0) {
+            if (e.type == SDL_QUIT) {
+                quit = 1;
+            }
+            else if (e.type == SDL_KEYDOWN) {
+                switch (e.key.keysym.sym) {
+                    case SDLK_q:
+                        quit = 1;
+                        break;
+                    case SDLK_a:
+                        addBall();
+                        break;
+                    case SDLK_u:
+                        GRAVITY += 0.1f;
+                        break;
+                    case SDLK_j:
+                        GRAVITY -= 0.1f;
+                        break;
+                    case SDLK_i:
+                        RADIUS += 1;
+                        break;
+                    case SDLK_k:
+                        RADIUS -= 1;
+                        break;
+                    case SDLK_o:
+                        FRICTION += 0.1f;
+                        break;
+                    case SDLK_l:
+                        FRICTION -= 0.1f;
+                        break;
                 }
             }
+            else if (e.button.button == SDL_BUTTON_LEFT) {
+                mouseX = e.button.x;
+                mouseY = e.button.y;
+
+                MOUSE_CLICKED = 1;
+            }
         }
+
+        SDL_SetRenderDrawColor(renderer, 44, 62, 80, 255);
+        SDL_RenderClear(renderer);
+
+        for (int i = 0; i < entity_count; i++) {
+            struct entity ett = entity_list[i];
+
+            if (MOUSE_CLICKED) {
+                float dx = mouseX - ett.posX;
+                float dy = mouseY - ett.posY;
+                float distance = sqrt(dx * dx + dy * dy);
+                if (distance == 0) distance = 0.1f;
+                if (distance < 10 * RADIUS) {
+                    float force = 2.0f / distance;
+                    ett.velX += force * dx;
+                    ett.velY += force * dy;
+                }
+            }
+
+            ett.gravity = GRAVITY;
+            ett.radius = RADIUS;
+
+            ett.velY += ett.gravity;
+
+            ett.posX += ett.velX;
+            ett.posY += ett.velY;
+
+            // Check for collision with walls
+            checkCollisionWithScreenBoundaries(&ett);
+
+            // Check for collision with other entities
+            for (int y = 0; y < entity_count; y++) {
+                if (i != y) { // Skip self-collision check
+                    struct entity ett2 = entity_list[y];
+                    if (checkParticleDistance(ett, ett2)) {
+                        if (checkCollision(ett, ett2)) {
+                            handleCollision(&ett, &ett2);
+                        }
+                    }
+                }
+            }
+
+            entity_list[i] = ett;
+
+            float speed = calculateSpeed(&ett);
+            Uint8 r, g, b;
+            speedToColor(speed, &r, &g, &b);
+
+            drawBall(renderer, (int)ett.posX, (int)ett.posY, ett.radius, r, g, b);
+        }
+
+        updateFPS();
+        averageSpeed = calculateAverageSpeed();
+        char debugText[128];
+        sprintf(debugText, "FPS: %.2f   ENTITIES: %d   AVERAGE SPEED: %.2f", fps, entity_count, averageSpeed);
+        renderText(renderer, font, debugText, 10, 10);
+
+        sprintf(debugText, "GRAVITY:%.1f   RADIUS:%d   FRICTION:%.1f", GRAVITY, RADIUS, FRICTION);
+        renderText(renderer, font, debugText, 10, CHAR_SIZE + 10);
+        SDL_RenderPresent(renderer);
+
+        MOUSE_CLICKED = 0;
+
+        SDL_Delay(16);
     }
 
     SDL_DestroyRenderer(renderer);
