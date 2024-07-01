@@ -60,13 +60,12 @@ int checkCollision(struct entity ett1, struct entity ett2) {
     return distance < (ett1.radius + ett2.radius);
 }
 
-
 float calculateSpeed(struct entity* ett) {
     return sqrt(ett->velX * ett->velX + ett->velY * ett->velY);
 }
 
 void speedToColor(float speed, Uint8* r, Uint8* g, Uint8* b) {
-    float normalizedSpeed = fmin(speed / averageSpeed, 1.0);
+    float normalizedSpeed = fmin(speed / 5, 1.0);
 
     *r = (Uint8)(normalizedSpeed * 255);
     *g = 0;
@@ -185,6 +184,7 @@ void drawBall(SDL_Renderer* renderer, int centerX, int centerY, int radius, Uint
             if (distance <= radius) {
                 // Exponential fade, the farther from the center, the more transparent
                 float alpha = 255 * exp(-2 * (distance / radius));
+//                float alpha = 255 * pow((1 - distance / radius), 2);
 
                 SDL_SetRenderDrawColor(renderer, r, g, b, (Uint8)alpha);
                 SDL_RenderDrawPoint(renderer, centerX + dx, centerY + dy);
